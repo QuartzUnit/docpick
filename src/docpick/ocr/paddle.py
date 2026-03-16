@@ -34,16 +34,11 @@ def _map_lang(lang: str) -> str:
 class PaddleOCREngine(OCREngine):
     """PaddleOCR v5 backend (Apache 2.0, 111 languages)."""
 
-    def __init__(self, use_gpu: bool | None = None, use_structure: bool = True) -> None:
-        self._ocr = None
-        self._use_gpu = use_gpu
-        self._use_structure = use_structure
+    def __init__(self) -> None:
+        self._ocr: dict[str, object] = {}
 
     def _get_ocr(self, languages: list[str] | None = None):
-        """Lazy-init PaddleOCR instance."""
-        if self._ocr is not None:
-            return self._ocr
-
+        """Lazy-init PaddleOCR instance per language."""
         try:
             from paddleocr import PaddleOCR
         except ImportError as e:
@@ -52,47 +47,53 @@ class PaddleOCREngine(OCREngine):
             ) from e
 
         lang = _map_lang(languages[0]) if languages else "korean"
-        use_gpu = self._use_gpu
-        if use_gpu is None:
-            try:
-                import paddle
-                use_gpu = paddle.device.is_compiled_with_cuda()
-            except Exception:
-                use_gpu = False
-
-        self._ocr = PaddleOCR(
-            use_angle_cls=True,
-            lang=lang,
-            use_gpu=use_gpu,
-            show_log=False,
-        )
-        return self._ocr
+        if lang not in self._ocr:
+            self._ocr[lang] = PaddleOCR(lang=lang)
+        return self._ocr[lang]
 
     def recognize(self, image: Image.Image, languages: list[str] | None = None) -> OCRResult:
         import numpy as np
+        import os
 
+        os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
         start = time.monotonic()
         ocr = self._get_ocr(languages)
 
-        img_array = np.array(image)
-        raw = ocr.ocr(img_array, cls=True)
+        # Save image to temp file (PaddleOCR v3.4+ predict() expects file path)
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            image.save(f, format="PNG")
+            tmp_path = f.name
+
+        try:
+            results = list(ocr.predict(tmp_path))
+        finally:
+            os.unlink(tmp_path)
 
         blocks: list[TextBlock] = []
         full_text_parts: list[str] = []
-        h, w = img_array.shape[:2]
+        w, h = image.size
 
-        if raw and raw[0]:
-            for line in raw[0]:
-                box, (text, conf) = line[0], line[1]
-                # Normalize bbox to 0~1
-                x_coords = [p[0] for p in box]
-                y_coords = [p[1] for p in box]
-                bbox = (
-                    min(x_coords) / w,
-                    min(y_coords) / h,
-                    max(x_coords) / w,
-                    max(y_coords) / h,
-                )
+        if results:
+            r = results[0]
+            texts = r.get("rec_texts", [])
+            scores = r.get("rec_scores", [])
+            polys = r.get("dt_polys", [])
+
+            for i, text in enumerate(texts):
+                conf = scores[i] if i < len(scores) else 0.0
+                if i < len(polys):
+                    poly = polys[i]
+                    x_coords = [p[0] for p in poly]
+                    y_coords = [p[1] for p in poly]
+                    bbox = (
+                        min(x_coords) / w,
+                        min(y_coords) / h,
+                        max(x_coords) / w,
+                        max(y_coords) / h,
+                    )
+                else:
+                    bbox = (0.0, 0.0, 1.0, 1.0)
                 blocks.append(TextBlock(text=text, bbox=bbox, confidence=conf))
                 full_text_parts.append(text)
 
