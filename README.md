@@ -1,5 +1,10 @@
 # Docpick
 
+[![PyPI](https://img.shields.io/pypi/v/docpick)](https://pypi.org/project/docpick/)
+[![Python](https://img.shields.io/pypi/pyversions/docpick)](https://pypi.org/project/docpick/)
+[![License](https://img.shields.io/github/license/QuartzUnit/docpick)](https://github.com/QuartzUnit/docpick/blob/main/LICENSE)
+[![Tests](https://img.shields.io/badge/tests-217%20passed-brightgreen)]()
+
 > Document in, Structured JSON out. Locally. With your schema.
 
 **docpick** is a lightweight, schema-driven document extraction pipeline that combines local OCR engines with local LLMs to extract structured JSON from any document — invoices, receipts, bills of lading, tax forms, and more.
