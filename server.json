@@ -1,0 +1,21 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.ArkNill/docpick",
+  "title": "Docpick",
+  "description": "Schema-driven document extraction with local OCR + LLM. Document in, Structured JSON out.",
+  "repository": {
+    "url": "https://github.com/QuartzUnit/docpick",
+    "source": "github"
+  },
+  "version": "0.1.2",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "docpick",
+      "version": "0.1.2",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}

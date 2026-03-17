@@ -231,3 +231,5 @@ Document (PDF/Image)
 ## License
 
 Apache 2.0 — all dependencies are Apache 2.0 or MIT licensed.
+
+<!-- mcp-name: io.github.ArkNill/docpick -->

@@ -3,7 +3,7 @@
 Document in, Structured JSON out. Locally. With your schema.
 """
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 from docpick.core.pipeline import DocpickPipeline
 from docpick.core.config import DocpickConfig
