@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "docpick"
-version = "0.1.1"
+version = "0.1.2"
 description = "Document in, Structured JSON out. Schema-driven document extraction with local OCR + LLM."
 readme = "README.md"
 license = "Apache-2.0"
@@ -54,8 +54,11 @@ got = [
     "transformers>=4.40",
     "torch>=2.0",
 ]
+mcp = [
+    "fastmcp>=2.0",
+]
 all = [
-    "docpick[paddle,easyocr,got]",
+    "docpick[paddle,easyocr,got,mcp]",
 ]
 dev = [
     "pytest>=8.0",
@@ -66,6 +69,7 @@ dev = [
 
 [project.scripts]
 docpick = "docpick.cli:main"
+docpick-mcp = "docpick.mcp_server:main"
 
 [project.urls]
 Homepage = "https://github.com/QuartzUnit/docpick"
