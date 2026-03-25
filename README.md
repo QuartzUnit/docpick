@@ -5,6 +5,8 @@
 [![License](https://img.shields.io/github/license/QuartzUnit/docpick)](https://github.com/QuartzUnit/docpick/blob/main/LICENSE)
 [![Tests](https://img.shields.io/badge/tests-217%20passed-brightgreen)]()
 
+> [한국어 문서](README.ko.md)
+
 > Document in, Structured JSON out. Locally. With your schema.
 
 **docpick** is a lightweight, schema-driven document extraction pipeline that combines local OCR engines with local LLMs to extract structured JSON from any document — invoices, receipts, bills of lading, tax forms, and more.
@@ -237,4 +239,4 @@ Document (PDF/Image)
 
 Apache 2.0 — all dependencies are Apache 2.0 or MIT licensed.
 
-<!-- mcp-name: io.github.ArkNill/docpick -->
+<!-- mcp-name: io.github.QuartzUnit/docpick -->
