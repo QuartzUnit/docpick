@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "docpick"
-version = "0.1.2"
+version = "0.1.3"
 description = "Document in, Structured JSON out. Schema-driven document extraction with local OCR + LLM."
 readme = "README.md"
 license = "Apache-2.0"
