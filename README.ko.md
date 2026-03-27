@@ -225,14 +225,16 @@ for path, extraction in result.results.items():
 
 ## 아키텍처
 
-```
-문서 (PDF/이미지)
-  → DocumentLoader (pypdfium2)
-  → Tier 1: OCR (PaddleOCR/EasyOCR, CPU)
-    → [신뢰도 < 임계값] → Tier 2: VLM (GOT/VLM, GPU)
-  → LLM Extractor (vLLM/Ollama, 스키마 프롬프트)
-  → Pydantic 검증 (체크디짓, 교차 필드, 교차 문서)
-  → ExtractionResult (구조화 JSON + 신뢰도 + 검증 결과)
+```mermaid
+flowchart TD
+    A["📄 문서\n(PDF / 이미지)"] --> B["DocumentLoader\n(pypdfium2)"]
+    B --> C["Tier 1: OCR\n(PaddleOCR / EasyOCR)\nCPU"]
+    C --> D{"신뢰도\n≥ 임계값?"}
+    D -->|"예"| F["LLM Extractor\n(vLLM / Ollama)\n스키마 프롬프트"]
+    D -->|"아니오"| E["Tier 2: VLM\n(GOT / VLM)\nGPU"]
+    E --> F
+    F --> G["Pydantic 검증"]
+    G --> H["✅ ExtractionResult"]
 ```
 
 ## 라이선스

@@ -225,14 +225,16 @@ for path, extraction in result.results.items():
 
 ## Architecture
 
-```
-Document (PDF/Image)
-  → DocumentLoader (pypdfium2)
-  → Tier 1: OCR (PaddleOCR/EasyOCR, CPU)
-    → [confidence < threshold] → Tier 2: VLM (GOT/VLM, GPU)
-  → LLM Extractor (vLLM/Ollama, schema prompt)
-  → Pydantic Validation (checkdigit, cross-field, cross-document)
-  → ExtractionResult (structured JSON + confidence + validation)
+```mermaid
+flowchart TD
+    A["📄 Document\n(PDF / Image)"] --> B["DocumentLoader\n(pypdfium2)"]
+    B --> C["Tier 1: OCR\n(PaddleOCR / EasyOCR)\nCPU"]
+    C --> D{"Confidence\n≥ threshold?"}
+    D -->|"yes"| F["LLM Extractor\n(vLLM / Ollama)\nSchema prompt"]
+    D -->|"no"| E["Tier 2: VLM\n(GOT / VLM)\nGPU"]
+    E --> F
+    F --> G["Pydantic Validation"]
+    G --> H["✅ ExtractionResult"]
 ```
 
 ## License
