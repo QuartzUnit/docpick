@@ -1,0 +1,63 @@
+# docpick
+
+> Document in, Structured JSON out. Schema-driven document extraction with local OCR + LLM.
+
+## Purpose
+
+Extracts structured data from documents (PDF, images) using a local OCR + LLM pipeline. Define a schema (built-in or custom JSON), and docpick runs OCR to read the document, then sends the text to a local LLM to extract fields matching your schema. All processing runs locally via PaddleOCR/EasyOCR and vLLM/Ollama.
+
+## Capabilities
+
+- **Schema-driven extraction**: Built-in schemas for invoice, receipt, bill of lading, purchase order, kr_tax_invoice, bank_statement, id_document, certificate_of_origin; or provide a custom JSON schema
+- **Multiple OCR engines**: PaddleOCR (default), EasyOCR, GOT-OCR2.0 -- all optional extras
+- **Local LLM extraction**: Sends OCR text to vLLM or Ollama for structured field extraction
+- **Validation**: Schema-based validation with typed errors and warnings
+- **Batch processing**: Process entire directories with configurable concurrency
+- **OCR-only mode**: Run OCR without LLM extraction for raw text output
+- **VLM mode**: Direct vision-language model extraction (skip OCR step)
+
+## Installation
+
+```
+pip install docpick
+pip install docpick[paddle]   # + PaddleOCR
+pip install docpick[easyocr]  # + EasyOCR
+pip install docpick[mcp]      # + MCP server
+pip install docpick[all]      # everything
+```
+
+## Quick Use
+
+### CLI
+
+```bash
+docpick extract invoice.pdf --schema invoice
+docpick extract receipt.jpg --schema receipt --ocr paddle --output result.json
+docpick ocr document.pdf --format markdown
+docpick batch ./documents/ --schema invoice --output ./results/ --concurrency 4
+docpick schemas list
+docpick schemas show invoice
+docpick validate result.json --schema invoice
+docpick config show
+```
+
+### Python
+
+```python
+from docpick import DocpickPipeline, DocpickConfig
+
+pipeline = DocpickPipeline(DocpickConfig.load())
+result = pipeline.extract("invoice.pdf", schema=InvoiceSchema, mode="auto")
+print(result.to_json(pretty=True))
+```
+
+### MCP
+
+Server: `docpick` (command: `docpick-mcp`)
+Tools: `extract_document`, `ocr_document`, `list_schemas`
+
+## Links
+
+- Docs: https://github.com/QuartzUnit/docpick
+- PyPI: https://pypi.org/project/docpick/
+- Source: https://github.com/QuartzUnit/docpick

@@ -43,5 +43,6 @@ Thumbs.db
 # Environment
 .env
 .env.local
+.mcpregistry_*
 CLAUDE.md
 PLAN.txt
