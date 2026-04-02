@@ -1,1371 +1,273 @@
-# docpick
+# docpick — Full API Reference
+> Document in, structured JSON out. Schema-driven extraction with local OCR + LLM.
 
-> Document in, Structured JSON out. Schema-driven document extraction with local OCR + LLM.
-
-## Purpose
-
-Extracts structured data from documents (PDF, images) using a local OCR + LLM pipeline. Define a schema (built-in or custom JSON), and docpick runs OCR to read the document, then sends the text to a local LLM to extract fields matching your schema. All processing runs locally via PaddleOCR/EasyOCR and vLLM/Ollama.
-
-## Capabilities
-
-- **Schema-driven extraction**: Built-in schemas for invoice, receipt, bill of lading, purchase order, kr_tax_invoice, bank_statement, id_document, certificate_of_origin; or provide a custom JSON schema
-- **Multiple OCR engines**: PaddleOCR (default), EasyOCR, GOT-OCR2.0 -- all optional extras
-- **Local LLM extraction**: Sends OCR text to vLLM or Ollama for structured field extraction
-- **Validation**: Schema-based validation with typed errors and warnings, plus check digit algorithms (Korean business number, Luhn, ISO 6346, IBAN, AWB)
-- **Cross-document validation**: Verify consistency across trade documents (Invoice, B/L, Packing List, Certificate of Origin)
-- **Batch processing**: Process entire directories with configurable concurrency
-- **OCR-only mode**: Run OCR without LLM extraction for raw text output
-- **VLM mode**: Direct vision-language model extraction (skip OCR step)
-- **Tiered OCR with fallback**: Auto engine selects Tier 1 (CPU: Paddle/EasyOCR), falls back to Tier 2 (GPU: GOT/VLM) on low confidence
-- **MCP server**: Expose extraction as MCP tools for Claude Code and other AI assistants
-
-## Installation
-
+## Install
 ```
-pip install docpick                # core (pydantic, Pillow, pypdfium2, httpx, click, rich)
-pip install docpick[paddle]        # + PaddleOCR
-pip install docpick[easyocr]       # + EasyOCR
-pip install docpick[got]           # + GOT-OCR2.0 (transformers + torch)
-pip install docpick[mcp]           # + MCP server (fastmcp)
-pip install docpick[all]           # everything
+pip install docpick[paddle|easyocr|got|mcp|all]
 ```
+Python >=3.11. Core deps: pydantic>=2.0, pydantic-settings>=2.0, Pillow>=10.0, pypdfium2>=4.0, httpx>=0.27, pyyaml>=6.0, click>=8.0, rich>=13.0.
 
-Requires Python >= 3.11. Dependencies: pydantic>=2.0, pydantic-settings>=2.0, Pillow>=10.0, pypdfium2>=4.0, httpx>=0.27, pyyaml>=6.0, click>=8.0, rich>=13.0.
-
-## Quick Use
-
-### CLI
-
+## CLI
 ```bash
 docpick extract invoice.pdf --schema invoice
 docpick extract receipt.jpg --schema receipt --ocr paddle --output result.json
 docpick ocr document.pdf --format markdown
-docpick batch ./documents/ --schema invoice --output ./results/ --concurrency 4
-docpick schemas list
-docpick schemas show invoice
+docpick batch ./docs/ --schema invoice --output ./out/ --concurrency 4
+docpick schemas list|show <name>
 docpick validate result.json --schema invoice
-docpick config show
-docpick config set llm.provider ollama
+docpick config show|set <key> <value>
 ```
-
-### Python
-
-```python
-from docpick import DocpickPipeline, DocpickConfig
-
-pipeline = DocpickPipeline(DocpickConfig.load())
-result = pipeline.extract("invoice.pdf", schema=InvoiceSchema, mode="auto")
-print(result.to_json(pretty=True))
-```
-
-### MCP
-
-Server: `docpick` (command: `docpick-mcp`)
-Tools: `extract_document`, `ocr_document`, `list_schemas`
 
 ## Configuration
+Config: `~/.docpick/config.yaml` + env overrides with `DOCPICK_` prefix (e.g. `DOCPICK_OCR_ENGINE`).
 
-Configuration is loaded from `~/.docpick/config.yaml` with environment variable overrides. All settings use the `DOCPICK_` prefix.
+| Key | Type | Default |
+|-----|------|---------|
+| ocr.engine | `auto\|paddle\|easyocr\|got\|vlm` | `auto` |
+| ocr.languages | `list[str]` | `["ko","en"]` |
+| ocr.gpu | `auto\|true\|false` | `auto` |
+| ocr.confidence_threshold | `float` | `0.7` |
+| llm.provider | `vllm\|ollama\|openai` | `vllm` |
+| llm.base_url | `str` | `http://localhost:8000/v1` |
+| llm.model | `str` | `Qwen/Qwen3.5-32B-AWQ` |
+| llm.temperature | `float` | `0.0` |
+| llm.max_tokens | `int` | `4096` |
+| llm.timeout | `int` | `30` |
+| vlm.enabled | `bool` | `false` |
+| vlm.base_url | `str` | `http://localhost:11434/v1` |
+| vlm.model | `str` | `Qwen/Qwen3-VL-4B` |
+| output.format | `json\|csv\|markdown` | `json` |
+| output.include_confidence | `bool` | `true` |
+| output.include_bbox | `bool` | `false` |
+| validation.enabled | `bool` | `true` |
+| validation.strict | `bool` | `false` |
 
-### Config File (~/.docpick/config.yaml)
+## API — Core Classes
 
-```yaml
-ocr:
-  engine: auto          # auto | paddle | easyocr | got | vlm
-  languages:
-    - ko
-    - en
-  gpu: auto             # auto | true | false
-  confidence_threshold: 0.7
+### DocpickConfig(BaseSettings)
+`.load(config_path: Path|None=None) -> DocpickConfig` — Load YAML + env overrides
+`.save(config_path: Path|None=None) -> None` — Save to YAML
+Fields: `ocr: OCRConfig`, `llm: LLMConfig`, `vlm: VLMConfig`, `output: OutputConfig`, `validation: ValidationConfig`
 
-llm:
-  provider: vllm        # vllm | ollama | openai
-  base_url: http://localhost:8000/v1
-  model: Qwen/Qwen3.5-32B-AWQ
-  temperature: 0.0
-  max_tokens: 4096
-  timeout: 30
-
-vlm:
-  enabled: false
-  base_url: http://localhost:11434/v1
-  model: Qwen/Qwen3-VL-4B
-
-output:
-  format: json           # json | csv | markdown
-  include_confidence: true
-  include_bbox: false
-  pretty_print: true
-
-validation:
-  enabled: true
-  strict: false
-```
-
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DOCPICK_OCR_ENGINE` | `auto` | OCR engine selection |
-| `DOCPICK_OCR_LANGUAGES` | `["ko","en"]` | OCR language codes |
-| `DOCPICK_OCR_GPU` | `auto` | GPU usage |
-| `DOCPICK_OCR_CONFIDENCE_THRESHOLD` | `0.7` | Auto-engine Tier 2 fallback threshold |
-| `DOCPICK_LLM_PROVIDER` | `vllm` | LLM backend |
-| `DOCPICK_LLM_BASE_URL` | `http://localhost:8000/v1` | LLM API endpoint |
-| `DOCPICK_LLM_MODEL` | `Qwen/Qwen3.5-32B-AWQ` | Model name |
-| `DOCPICK_LLM_TEMPERATURE` | `0.0` | Sampling temperature |
-| `DOCPICK_LLM_MAX_TOKENS` | `4096` | Max output tokens |
-| `DOCPICK_LLM_TIMEOUT` | `30` | Request timeout (seconds) |
-| `DOCPICK_VLM_ENABLED` | `false` | Enable VLM direct extraction |
-| `DOCPICK_VLM_BASE_URL` | `http://localhost:11434/v1` | VLM API endpoint |
-| `DOCPICK_VLM_MODEL` | `Qwen/Qwen3-VL-4B` | VLM model name |
-| `DOCPICK_OUTPUT_FORMAT` | `json` | Output format |
-| `DOCPICK_OUTPUT_INCLUDE_CONFIDENCE` | `true` | Include per-field confidence |
-| `DOCPICK_OUTPUT_INCLUDE_BBOX` | `false` | Include bounding boxes |
-| `DOCPICK_VALIDATION_ENABLED` | `true` | Enable schema validation |
-| `DOCPICK_VALIDATION_STRICT` | `false` | Strict validation mode |
-
-## API Reference
-
-### docpick (top-level exports)
-
+### DocpickPipeline
 ```python
-from docpick import DocpickPipeline, DocpickConfig, ExtractionResult, OCRResult
+DocpickPipeline(config: DocpickConfig|None = None)
 ```
+`.extract(source, schema, mode, languages) -> ExtractionResult` — Main extraction entry point
+`.ocr_engine -> OCREngine` — Lazy-initialized OCR engine
+`.llm_provider -> LLMProvider` — Lazy-initialized LLM provider
 
----
+#### extract() Parameters
+| param | type | default | desc |
+|-------|------|---------|------|
+| source | `str\|Path\|Image.Image` | required | File path or PIL Image |
+| schema | `type[BaseModel]\|None` | `None` | Pydantic model; None=OCR only |
+| mode | `str` | `"auto"` | `auto\|ocr+llm\|vlm\|ocr_only` |
+| languages | `list[str]\|None` | `None` | OCR langs; None=use config |
 
-### class DocpickConfig(BaseSettings)
+Mode logic: `auto` = VLM if enabled+schema, else OCR+LLM if schema, else OCR only.
 
-Configuration container. Loads from YAML file + environment variables.
+### ExtractionResult
+| field | type | desc |
+|-------|------|------|
+| data | `dict[str,Any]` | Extracted structured fields |
+| confidence | `dict[str,float]` | Per-field confidence 0.0-1.0 |
+| validation | `ValidationResult` | Validation result |
+| ocr_result | `OCRResult\|None` | Raw OCR output |
+| text | `str` | Raw OCR text |
+| markdown | `str` | OCR text as markdown |
+| schema_name | `str` | Schema class name |
+| mode | `str` | Mode used |
+| processing_time_ms | `float` | Total time ms |
+| errors | `list[str]` | Error messages |
+`.to_json(pretty: bool=True) -> str` — Serialize to JSON
 
+### OCRResult
+| field | type | desc |
+|-------|------|------|
+| text | `str` | Full recognized text |
+| blocks | `list[TextBlock]` | Text blocks with positions |
+| tables | `list[Table]` | Detected tables |
+| layout | `LayoutInfo\|None` | Document layout info |
+| metadata | `dict[str,Any]` | Engine-specific metadata |
+| engine | `str` | Engine name |
+| processing_time_ms | `float` | OCR time ms |
+`.avg_confidence -> float` — Average confidence across blocks
+`.low_confidence_blocks -> list[TextBlock]` — Blocks with confidence < 0.7
+`.to_markdown() -> str` — Convert to structured markdown
+
+### TextBlock
+`text: str`, `bbox: tuple[float,float,float,float]` (x1,y1,x2,y2 normalized 0-1), `confidence: float`, `page: int=0`, `block_type: str="text"` (text|title|table|figure|header|footer)
+
+### Table
+`cells: list[TableCell]`, `bbox: tuple[float,float,float,float]`, `page: int=0`, `rows: int=0`, `cols: int=0`
+`.to_markdown() -> str` — Markdown table with header separator
+TableCell: `text: str`, `row: int`, `col: int`, `row_span: int=1`, `col_span: int=1`
+
+### LayoutInfo
+`page_count: int=1`, `is_scanned: bool=False`, `has_tables: bool=False`, `has_figures: bool=False`, `detected_languages: list[str]=[]`, `orientation: int=0`
+
+### ValidationResult
+`is_valid: bool=True`, `errors: list[ValidationError]=[]`, `warnings: list[ValidationWarning]=[]`, `rules_applied: int=0`, `rules_passed: int=0`
+ValidationError: `field: str`, `rule: str`, `message: str`, `expected: Any=None`, `actual: Any=None`
+ValidationWarning: `field: str`, `rule: str`, `message: str`
+
+### BatchProcessor & BatchResult
 ```python
-class DocpickConfig(BaseSettings):
-    ocr: OCRConfig                    # OCR engine settings
-    llm: LLMConfig                    # LLM provider settings
-    vlm: VLMConfig                    # VLM settings
-    output: OutputConfig              # Output formatting
-    validation: ValidationConfig      # Validation settings
+BatchProcessor(config: DocpickConfig|None=None, concurrency: int=4)
 ```
+`.process_directory(directory, schema, mode, languages, recursive, on_progress) -> BatchResult`
 
-#### DocpickConfig.load
+| param | type | default | desc |
+|-------|------|---------|------|
+| directory | `str\|Path` | required | Directory path |
+| schema | `type[BaseModel]\|None` | `None` | Pydantic model |
+| mode | `str` | `"auto"` | Extraction mode |
+| recursive | `bool` | `False` | Search subdirs |
+| on_progress | `Callable[[int,int],None]\|None` | `None` | Callback (done, total) |
 
+BatchResult: `total: int`, `succeeded: int`, `failed: int`, `results: dict[str,ExtractionResult]`, `errors: dict[str,str]`, `processing_time_ms: float`
+`.summary -> dict[str,Any]`
+
+### DocumentLoader
 ```python
-@classmethod
-def load(cls, config_path: Path | None = None) -> DocpickConfig
+DocumentLoader(dpi: int=300)
 ```
-
-Load config from YAML file, then override with env vars. Default path: `~/.docpick/config.yaml`.
-
-**Parameters:**
-- `config_path` (`Path | None`): Custom config file path. Default: `None` (uses `~/.docpick/config.yaml`).
-
-**Returns:** `DocpickConfig`
-
-#### DocpickConfig.save
-
-```python
-def save(self, config_path: Path | None = None) -> None
-```
-
-Save current config to YAML file. Creates parent directories if needed.
-
-**Parameters:**
-- `config_path` (`Path | None`): Custom output path. Default: `None` (uses `~/.docpick/config.yaml`).
-
----
-
-### class OCRConfig(BaseSettings)
-
-```python
-class OCRConfig(BaseSettings):
-    engine: Literal["auto", "paddle", "easyocr", "got", "vlm"] = "auto"
-    languages: list[str] = ["ko", "en"]
-    gpu: Literal["auto", "true", "false"] = "auto"
-    confidence_threshold: float = 0.7   # Tier 2 fallback threshold for auto engine
-```
-
-Env prefix: `DOCPICK_OCR_`
-
----
-
-### class LLMConfig(BaseSettings)
-
-```python
-class LLMConfig(BaseSettings):
-    provider: Literal["vllm", "ollama", "openai"] = "vllm"
-    base_url: str = "http://localhost:8000/v1"
-    model: str = "Qwen/Qwen3.5-32B-AWQ"
-    temperature: float = 0.0
-    max_tokens: int = 4096
-    timeout: int = 30
-```
-
-Env prefix: `DOCPICK_LLM_`
-
----
-
-### class VLMConfig(BaseSettings)
-
-```python
-class VLMConfig(BaseSettings):
-    enabled: bool = False
-    base_url: str = "http://localhost:11434/v1"
-    model: str = "Qwen/Qwen3-VL-4B"
-```
-
-Env prefix: `DOCPICK_VLM_`
-
----
-
-### class OutputConfig(BaseSettings)
-
-```python
-class OutputConfig(BaseSettings):
-    format: Literal["json", "csv", "markdown"] = "json"
-    include_confidence: bool = True
-    include_bbox: bool = False
-    pretty_print: bool = True
-```
-
-Env prefix: `DOCPICK_OUTPUT_`
-
----
-
-### class ValidationConfig(BaseSettings)
-
-```python
-class ValidationConfig(BaseSettings):
-    enabled: bool = True
-    strict: bool = False
-```
-
-Env prefix: `DOCPICK_VALIDATION_`
-
----
-
-### class DocpickPipeline
-
-Main pipeline: Document -> OCR -> LLM -> Structured JSON.
-
-```python
-class DocpickPipeline:
-    def __init__(self, config: DocpickConfig | None = None) -> None
-```
-
-**Parameters:**
-- `config` (`DocpickConfig | None`): Configuration. Default: `None` (loads from `DocpickConfig.load()`).
-
-**Properties:**
-- `ocr_engine` -> `OCREngine`: Lazy-initialized OCR engine based on config.
-- `llm_provider` -> `LLMProvider`: Lazy-initialized LLM provider based on config.
-
-#### DocpickPipeline.extract
-
-```python
-def extract(
-    self,
-    source: str | Path | Image.Image,
-    schema: type[BaseModel] | None = None,
-    mode: str = "auto",
-    languages: list[str] | None = None,
-) -> ExtractionResult
-```
-
-Extract structured data from a document.
-
-**Parameters:**
-- `source` (`str | Path | Image.Image`): File path (PDF/image) or PIL Image.
-- `schema` (`type[BaseModel] | None`): Pydantic model defining expected fields. `None` = OCR only. Default: `None`.
-- `mode` (`str`): Extraction mode. Default: `"auto"`.
-  - `"auto"`: Uses VLM if enabled + schema provided, else OCR+LLM if schema provided, else OCR only.
-  - `"ocr+llm"`: Run OCR then LLM extraction.
-  - `"vlm"`: Direct vision-language model extraction (skips OCR).
-  - `"ocr_only"`: OCR text only, no LLM.
-- `languages` (`list[str] | None`): OCR language codes (e.g., `["ko", "en"]`). Default: `None` (uses config).
-
-**Returns:** `ExtractionResult`
-
----
-
-### class ExtractionResult
-
-Final extraction result combining OCR, LLM extraction, and validation.
-
-```python
-@dataclass
-class ExtractionResult:
-    data: dict[str, Any] = {}              # Extracted structured fields
-    confidence: dict[str, float] = {}      # Per-field confidence scores (0.0-1.0)
-    validation: ValidationResult = ...      # Validation result
-    ocr_result: OCRResult | None = None    # Raw OCR output
-    text: str = ""                          # Raw OCR text
-    markdown: str = ""                      # OCR text as markdown
-    schema_name: str = ""                   # Schema class name
-    mode: str = "ocr+llm"                  # Mode used: "ocr+llm", "vlm", "ocr_only"
-    processing_time_ms: float = 0.0        # Total processing time
-    errors: list[str] = []                 # Error messages
-```
-
-#### ExtractionResult.to_json
-
-```python
-def to_json(self, pretty: bool = True) -> str
-```
-
-Serialize result to JSON string.
-
-**Parameters:**
-- `pretty` (`bool`): Pretty-print with 2-space indent. Default: `True`.
-
-**Returns:** `str` -- JSON with `data`, `confidence`, `validation`, `metadata`, and optional `errors` keys.
-
----
-
-### class OCRResult
-
-Result from OCR engine.
-
-```python
-@dataclass
-class OCRResult:
-    text: str                                # Full recognized text
-    blocks: list[TextBlock] = []             # Individual text blocks with positions
-    tables: list[Table] = []                 # Detected tables
-    layout: LayoutInfo | None = None         # Document layout information
-    metadata: dict[str, Any] = {}            # Engine-specific metadata
-    engine: str = ""                         # Engine name that produced this result
-    processing_time_ms: float = 0.0          # OCR processing time
-```
-
-**Properties:**
-- `avg_confidence` -> `float`: Average confidence across all blocks.
-- `low_confidence_blocks` -> `list[TextBlock]`: Blocks with confidence < 0.7.
-
-#### OCRResult.to_markdown
-
-```python
-def to_markdown(self) -> str
-```
-
-Convert OCR result to structured markdown. Titles become `## headings`, tables become markdown tables.
-
-**Returns:** `str`
-
----
-
-### class TextBlock
-
-A block of recognized text with position and confidence.
-
-```python
-@dataclass
-class TextBlock:
-    text: str                                              # Recognized text
-    bbox: tuple[float, float, float, float]                # (x1, y1, x2, y2) normalized 0~1
-    confidence: float                                      # 0.0~1.0
-    page: int = 0                                          # Page index
-    block_type: str = "text"                               # text | title | table | figure | header | footer
-```
-
----
-
-### class Table
-
-A detected table with cells.
-
-```python
-@dataclass
-class Table:
-    cells: list[TableCell]                                 # Table cells
-    bbox: tuple[float, float, float, float]                # (x1, y1, x2, y2) normalized 0~1
-    page: int = 0                                          # Page index
-    rows: int = 0                                          # Number of rows
-    cols: int = 0                                          # Number of columns
-```
-
-#### Table.to_markdown
-
-```python
-def to_markdown(self) -> str
-```
-
-Convert table to markdown format with header separator.
-
-**Returns:** `str`
-
----
-
-### class TableCell
-
-A single cell in a detected table.
-
-```python
-@dataclass
-class TableCell:
-    text: str              # Cell text content
-    row: int               # Row index (0-based)
-    col: int               # Column index (0-based)
-    row_span: int = 1      # Number of rows this cell spans
-    col_span: int = 1      # Number of columns this cell spans
-```
-
----
-
-### class LayoutInfo
-
-Document layout information.
-
-```python
-@dataclass
-class LayoutInfo:
-    page_count: int = 1                    # Number of pages
-    is_scanned: bool = False               # Whether the document is a scanned image
-    has_tables: bool = False               # Tables detected
-    has_figures: bool = False              # Figures/images detected
-    detected_languages: list[str] = []     # Detected language codes
-    orientation: int = 0                   # Rotation in degrees
-```
-
----
-
-### class ValidationResult
-
-Result of schema validation.
-
-```python
-@dataclass
-class ValidationResult:
-    is_valid: bool = True                          # True if no errors
-    errors: list[ValidationError] = []             # Validation errors
-    warnings: list[ValidationWarning] = []         # Non-critical warnings
-    rules_applied: int = 0                         # Total rules checked
-    rules_passed: int = 0                          # Rules that passed
-```
-
----
-
-### class ValidationError
-
-```python
-@dataclass
-class ValidationError:
-    field: str                  # Field name
-    rule: str                   # Rule identifier
-    message: str                # Human-readable error message
-    expected: Any = None        # Expected value
-    actual: Any = None          # Actual value
-```
-
----
-
-### class ValidationWarning
-
-```python
-@dataclass
-class ValidationWarning:
-    field: str                  # Field name
-    rule: str                   # Rule identifier
-    message: str                # Human-readable warning message
-```
-
----
-
-### class DocumentLoader
-
-Load documents (PDF/images) and yield pages as PIL Images.
-
-```python
-class DocumentLoader:
-    def __init__(self, dpi: int = 300) -> None
-```
-
-**Parameters:**
-- `dpi` (`int`): DPI for PDF-to-image conversion. Default: `300`.
-
-#### DocumentLoader.load
-
-```python
-def load(self, path: str | Path) -> list[Image.Image]
-```
-
-Load a document and return list of page images.
-
-**Parameters:**
-- `path` (`str | Path`): Path to PDF or image file.
-
-**Returns:** `list[Image.Image]`
-
-**Raises:** `FileNotFoundError`, `ValueError` (unsupported format).
-
-#### DocumentLoader.iter_pages
-
-```python
-def iter_pages(self, path: str | Path) -> Iterator[Image.Image]
-```
-
-Iterate over document pages as PIL Images. Memory-efficient for large PDFs.
-
-#### DocumentLoader.is_supported (static)
-
-```python
-@staticmethod
-def is_supported(path: str | Path) -> bool
-```
-
-Check if the file format is supported. Supported: `.pdf`, `.png`, `.jpg`, `.jpeg`, `.tiff`, `.tif`, `.bmp`, `.webp`.
-
-#### DocumentLoader.detect_type (static)
-
-```python
-@staticmethod
-def detect_type(path: str | Path) -> str
-```
-
-Detect document type. Returns `"image"` or `"pdf"`.
-
----
-
-### class BatchProcessor
-
-Process multiple documents in parallel.
-
-```python
-class BatchProcessor:
-    def __init__(
-        self,
-        config: DocpickConfig | None = None,
-        concurrency: int = 4,
-    ) -> None
-```
-
-**Parameters:**
-- `config` (`DocpickConfig | None`): Configuration. Default: `None` (loads from default).
-- `concurrency` (`int`): Number of parallel workers. Default: `4`.
-
-#### BatchProcessor.process_directory
-
-```python
-def process_directory(
-    self,
-    directory: str | Path,
-    schema: type[BaseModel] | None = None,
-    mode: str = "auto",
-    languages: list[str] | None = None,
-    recursive: bool = False,
-    on_progress: Callable[[int, int], None] | None = None,
-) -> BatchResult
-```
-
-Process all supported documents in a directory.
-
-**Parameters:**
-- `directory` (`str | Path`): Path to directory containing documents.
-- `schema` (`type[BaseModel] | None`): Pydantic model for extraction. `None` = OCR only. Default: `None`.
-- `mode` (`str`): Extraction mode. Default: `"auto"`.
-- `languages` (`list[str] | None`): OCR language codes. Default: `None` (uses config).
-- `recursive` (`bool`): Search subdirectories. Default: `False`.
-- `on_progress` (`Callable[[int, int], None] | None`): Callback `(completed, total)` for progress updates. Default: `None`.
-
-**Returns:** `BatchResult`
-
----
-
-### class BatchResult
-
-Result of batch processing.
-
-```python
-@dataclass
-class BatchResult:
-    total: int = 0                                       # Total files found
-    succeeded: int = 0                                   # Successfully processed
-    failed: int = 0                                      # Failed to process
-    results: dict[str, ExtractionResult] = {}            # File path -> result
-    errors: dict[str, str] = {}                          # File path -> error message
-    processing_time_ms: float = 0.0                      # Total processing time
-```
-
-**Properties:**
-- `summary` -> `dict[str, Any]`: Summary dict with total, succeeded, failed, processing_time_ms, errors.
-
----
-
-### OCR Engines
-
-All OCR engines implement the `OCREngine` abstract base class.
-
-#### class OCREngine (ABC)
-
-```python
-class OCREngine(ABC):
-    @abstractmethod
-    def recognize(self, image: Image.Image, languages: list[str] | None = None) -> OCRResult
-    def recognize_file(self, path: str | Path, languages: list[str] | None = None) -> OCRResult
-    @abstractmethod
-    def is_available(self) -> bool
-    @property
-    @abstractmethod
-    def name(self) -> str
-    @property
-    @abstractmethod
-    def requires_gpu(self) -> bool
-    @property
-    @abstractmethod
-    def supported_languages(self) -> list[str]
-```
-
-#### class AutoEngine(OCREngine)
-
-Automatically select the best available OCR engine with confidence-based Tier 2 fallback.
-
-```python
-class AutoEngine(OCREngine):
-    def __init__(
-        self,
-        confidence_threshold: float = 0.7,
-        enable_fallback: bool = True,
-    ) -> None
-```
-
-**Parameters:**
-- `confidence_threshold` (`float`): If Tier 1 avg confidence < this, fall back to Tier 2. Default: `0.7`.
-- `enable_fallback` (`bool`): Enable Tier 2 fallback. Default: `True`.
-
-Tier 1 priority: paddle > easyocr (CPU, lightweight).
-Tier 2 priority: got > vlm (GPU, heavyweight).
-
-#### class PaddleOCREngine(OCREngine)
-
-PaddleOCR v5 backend (Apache 2.0, 111 languages). Default engine.
-
-```python
-class PaddleOCREngine(OCREngine):
-    def __init__(self) -> None
-```
-
-Requires: `pip install docpick[paddle]`. Supports languages: ko, en, ja, zh, zh-cn, zh-tw, fr, de, es, pt, it, ru, ar. Does not require GPU.
-
-#### class EasyOCREngine(OCREngine)
-
-EasyOCR backend (Apache 2.0, 80+ languages, Korean-optimized).
-
-```python
-class EasyOCREngine(OCREngine):
-    def __init__(self, use_gpu: bool = False) -> None
-```
-
-**Parameters:**
-- `use_gpu` (`bool`): Enable GPU acceleration. Default: `False`.
-
-Requires: `pip install docpick[easyocr]`. Supports languages: ko, en, ja, zh, fr, de, es, pt, it, ru, ar.
-
-#### class GOTOCREngine(OCREngine)
-
-GOT-OCR2.0 backend (580M param end-to-end transformer OCR).
-
-```python
-class GOTOCREngine(OCREngine):
-    def __init__(
-        self,
-        model_name: str = "stepfun-ai/GOT-OCR-2.0-hf",
-        device: str = "auto",
-        ocr_type: str = "ocr",
-    ) -> None
-```
-
-**Parameters:**
-- `model_name` (`str`): HuggingFace model ID. Default: `"stepfun-ai/GOT-OCR-2.0-hf"`.
-- `device` (`str`): `"auto"` / `"cuda"` / `"cpu"`. Default: `"auto"`.
-- `ocr_type` (`str`): `"ocr"` (plain text) or `"format"` (markdown/LaTeX). Default: `"ocr"`.
-
-Requires: `pip install docpick[got]` (transformers + torch). Requires GPU for practical use.
-
-#### class VLMOCREngine(OCREngine)
-
-VLM-based OCR using OpenAI-compatible vision API. Works with any VLM: Qwen-VL, InternVL, etc.
-
-```python
-class VLMOCREngine(OCREngine):
-    def __init__(
-        self,
-        base_url: str = "http://localhost:11434/v1",
-        model: str = "Qwen/Qwen3-VL-4B",
-        temperature: float = 0.0,
-        max_tokens: int = 4096,
-        timeout: int = 60,
-    ) -> None
-```
-
-**Parameters:**
-- `base_url` (`str`): OpenAI-compatible API base URL. Default: `"http://localhost:11434/v1"`.
-- `model` (`str`): Model name. Default: `"Qwen/Qwen3-VL-4B"`.
-- `temperature` (`float`): Sampling temperature. Default: `0.0`.
-- `max_tokens` (`int`): Max output tokens. Default: `4096`.
-- `timeout` (`int`): Request timeout in seconds. Default: `60`.
-
-#### get_engine
-
-```python
-def get_engine(name: str = "auto", **kwargs) -> OCREngine
-```
-
-Factory function to get an OCR engine by name.
-
-**Parameters:**
-- `name` (`str`): Engine name (`"auto"`, `"paddle"`, `"easyocr"`, `"got"`, `"vlm"`). Default: `"auto"`.
-
-**Returns:** `OCREngine`
-
-#### estimate_complexity
-
-```python
-def estimate_complexity(image: Image.Image) -> float
-```
-
-Estimate document complexity (0.0=simple, 1.0=complex). Heuristic based on image size, aspect ratio, and color variance.
-
-**Parameters:**
-- `image` (`Image.Image`): PIL Image to analyze.
-
-**Returns:** `float` (0.0 to 1.0)
-
----
-
-### LLM Providers
-
-All providers implement the `LLMProvider` abstract base class.
-
-#### class LLMProvider (ABC)
-
-```python
-class LLMProvider(ABC):
-    @abstractmethod
-    def extract_fields(
-        self,
-        text: str,
-        schema: type[BaseModel],
-        context: dict[str, Any] | None = None,
-        max_retries: int = 1,
-    ) -> dict[str, Any]
-
-    @abstractmethod
-    def extract_from_image(
-        self,
-        image_base64: str,
-        schema: type[BaseModel],
-        max_retries: int = 1,
-    ) -> dict[str, Any]
-
-    @abstractmethod
-    def is_available(self) -> bool
-
-    @property
-    @abstractmethod
-    def name(self) -> str
-```
-
-#### class VLLMProvider(LLMProvider)
-
-vLLM provider using OpenAI-compatible API.
-
-```python
-class VLLMProvider(LLMProvider):
-    def __init__(
-        self,
-        base_url: str = "http://localhost:8000/v1",
-        model: str = "Qwen/Qwen3.5-32B-AWQ",
-        temperature: float = 0.0,
-        max_tokens: int = 4096,
-        timeout: int = 30,
-    ) -> None
-```
-
-**Parameters:**
-- `base_url` (`str`): vLLM API base URL. Default: `"http://localhost:8000/v1"`.
-- `model` (`str`): Model name. Default: `"Qwen/Qwen3.5-32B-AWQ"`.
-- `temperature` (`float`): Sampling temperature. Default: `0.0`.
-- `max_tokens` (`int`): Max output tokens. Default: `4096`.
-- `timeout` (`int`): Request timeout in seconds. Default: `30`.
-
-Sends `chat_template_kwargs: {"enable_thinking": false}` with every request.
-
-#### class OllamaProvider(LLMProvider)
-
-Ollama provider using native Ollama API.
-
-```python
-class OllamaProvider(LLMProvider):
-    def __init__(
-        self,
-        base_url: str = "http://localhost:11434",
-        model: str = "qwen3.5:7b",
-        temperature: float = 0.0,
-        max_tokens: int = 4096,
-        timeout: int = 60,
-    ) -> None
-```
-
-**Parameters:**
-- `base_url` (`str`): Ollama API base URL. Default: `"http://localhost:11434"`.
-- `model` (`str`): Model name. Default: `"qwen3.5:7b"`.
-- `temperature` (`float`): Sampling temperature. Default: `0.0`.
-- `max_tokens` (`int`): Max output tokens. Default: `4096`.
-- `timeout` (`int`): Request timeout in seconds. Default: `60`.
-
-#### get_provider
-
-```python
-def get_provider(provider_name: str = "vllm", **kwargs) -> LLMProvider
-```
-
-Factory function to get an LLM provider by name.
-
-**Parameters:**
-- `provider_name` (`str`): Provider name (`"vllm"`, `"ollama"`). Default: `"vllm"`.
-
-**Returns:** `LLMProvider`
-
----
+`.load(path) -> list[Image.Image]` — Load all pages
+`.iter_pages(path) -> Iterator[Image.Image]` — Memory-efficient page iterator
+`.is_supported(path) -> bool` — Supported: pdf, png, jpg, jpeg, tiff, tif, bmp, webp
+`.detect_type(path) -> str` — Returns `"image"` or `"pdf"`
+
+## API — OCR Engines
+All implement `OCREngine(ABC)`:
+`.recognize(image, languages) -> OCRResult`
+`.recognize_file(path, languages) -> OCRResult`
+`.is_available() -> bool`, `.name -> str`, `.requires_gpu -> bool`, `.supported_languages -> list[str]`
+
+| Engine | Class | Extra | GPU | Notes |
+|--------|-------|-------|-----|-------|
+| auto | `AutoEngine` | core | no | Tier1(paddle>easyocr)→Tier2(got>vlm) fallback on low confidence |
+| paddle | `PaddleOCREngine` | `[paddle]` | no | PaddleOCR v5, 111 langs, default |
+| easyocr | `EasyOCREngine` | `[easyocr]` | opt | 80+ langs, Korean-optimized |
+| got | `GOTOCREngine` | `[got]` | yes | 580M param transformer OCR |
+| vlm | `VLMOCREngine` | core | yes | OpenAI-compatible vision API |
+
+AutoEngine extra params: `confidence_threshold: float=0.7`, `enable_fallback: bool=True`
+EasyOCREngine: `use_gpu: bool=False`
+GOTOCREngine: `model_name: str="stepfun-ai/GOT-OCR-2.0-hf"`, `device: str="auto"`, `ocr_type: str="ocr"` (ocr|format)
+VLMOCREngine: `base_url`, `model`, `temperature`, `max_tokens`, `timeout`
+`get_engine(name: str="auto", **kwargs) -> OCREngine` — Factory function
+`estimate_complexity(image: Image.Image) -> float` — 0.0=simple, 1.0=complex
+
+## API — LLM Providers
+All implement `LLMProvider(ABC)`:
+`.extract_fields(text, schema, context, max_retries) -> dict[str,Any]`
+`.extract_from_image(image_base64, schema, max_retries) -> dict[str,Any]`
+`.is_available() -> bool`, `.name -> str`
+
+| Provider | Class | Default base_url | Default model |
+|----------|-------|-----------------|---------------|
+| vllm | `VLLMProvider` | `http://localhost:8000/v1` | `Qwen/Qwen3.5-32B-AWQ` |
+| ollama | `OllamaProvider` | `http://localhost:11434` | `qwen3.5:7b` |
+
+All providers accept: `base_url`, `model`, `temperature=0.0`, `max_tokens=4096`, `timeout` (vllm:30, ollama:60).
+VLLMProvider sends `chat_template_kwargs: {"enable_thinking": false}` with every request.
+`get_provider(provider_name: str="vllm", **kwargs) -> LLMProvider` — Factory function
 
 ### Prompt Utilities (docpick.llm.prompt)
+`build_extraction_prompt(text, schema, context) -> list[dict]` — Chat messages for LLM extraction
+`build_vlm_extraction_prompt(schema) -> list[dict]` — Chat messages for VLM (caller appends image)
+`parse_llm_json(response: str) -> dict` — Parse JSON from LLM response; handles code blocks, trailing commas
+`build_retry_messages(failed_response: str) -> list[dict]` — Retry messages for failed JSON
 
-#### build_extraction_prompt
+## API — Schemas
+All extend `DocumentSchema(BaseModel)` with `extra="allow"`. Auto-registered in `schema_registry`.
 
-```python
-def build_extraction_prompt(
-    text: str,
-    schema: type[BaseModel],
-    context: dict[str, Any] | None = None,
-) -> list[dict[str, str]]
-```
+### SchemaRegistry
+`schema_registry.register(name, schema) -> None`
+`schema_registry.get(name) -> type[DocumentSchema]` — Raises KeyError
+`schema_registry.list() -> dict[str, type[DocumentSchema]]`
+`schema_registry.names() -> list[str]`
 
-Build chat messages for LLM extraction. Includes system prompt with extraction rules, schema JSON, document text, and optional context (tables, language, low-confidence regions).
+### Built-in Schemas
+| Name | Key Fields | Line Items | Validations |
+|------|-----------|------------|-------------|
+| `invoice` | invoice_number, dates, currency, vendor_*, customer_*, subtotal, tax_amount, total_amount | InvoiceLineItem(desc, qty, unit, unit_price, amount, tax_rate, hs_code) | sum_equals, date_before, check_digit(tax_id), required |
+| `receipt` | merchant_*, receipt_number, transaction_date/time, subtotal, tax, tip, total | ReceiptLineItem(desc, qty, unit_price, total_price, category) | sum_equals, check_digit, required |
+| `bill_of_lading` | bl_number, shipper_*, consignee_*, vessel, ports, containers, freight_* | ContainerDetail(container#, seal#, type, packages, weight, cbm) | required, date_before, sum_equals, regex |
+| `purchase_order` | po_number, buyer_*, seller_*, subtotal, tax_amount, total_amount | POLineItem(line#, item#, desc, qty, unit, unit_price, amount) | required, sum_equals, date_before |
+| `kr_tax_invoice` | approval_number, supplier_*/buyer_*(biz#,name,rep,addr), totals | TaxInvoiceLineItem(date, name, spec, qty, prices, tax) | required, check_digit(kr_biz#), sum_equals |
+| `bank_statement` | bank, account_number/holder, iban, balances, transactions | Transaction(date, desc, ref, debit, credit, balance) | required, date_before, check_digit(IBAN) |
+| `id_document` | doc_type/number, issuing_*, name, nationality, dates, sex, mrz | -- | required, date_before, regex |
+| `certificate_of_origin` | cert_number, exporter_*, consignee_*, origin, items | CertificateItem(desc, hs_code, qty, weight, value) | required, regex(ISO 3166-1) |
 
-**Returns:** List of message dicts with `role` and `content` keys.
-
-#### build_vlm_extraction_prompt
-
-```python
-def build_vlm_extraction_prompt(
-    schema: type[BaseModel],
-) -> list[dict[str, Any]]
-```
-
-Build chat messages for VLM direct image extraction. Image content should be appended by the caller.
-
-**Returns:** List of message dicts.
-
-#### parse_llm_json
-
-```python
-def parse_llm_json(response: str) -> dict[str, Any]
-```
-
-Parse JSON from LLM response. Handles markdown code blocks, trailing commas, and embedded JSON objects. Tries 4 strategies: direct parse, JSON boundary extraction, trailing comma cleanup, combined.
-
-**Parameters:**
-- `response` (`str`): Raw LLM response text.
-
-**Returns:** `dict[str, Any]`
-
-**Raises:** `json.JSONDecodeError` if all strategies fail.
-
-#### build_retry_messages
-
-```python
-def build_retry_messages(failed_response: str) -> list[dict[str, str]]
-```
-
-Build messages to append for retrying failed JSON extraction.
-
----
-
-### Schemas
-
-All schemas extend `DocumentSchema(BaseModel)` with `extra="allow"`. Each schema is auto-registered in the global `schema_registry`.
-
-#### class DocumentSchema(BaseModel)
-
-Base class for all document schemas. Config: `extra="allow"`.
-
-#### class SchemaRegistry
-
-```python
-class SchemaRegistry:
-    def __init__(self) -> None
-    def register(self, name: str, schema: type[DocumentSchema]) -> None
-    def get(self, name: str) -> type[DocumentSchema]          # Raises KeyError
-    def list(self) -> dict[str, type[DocumentSchema]]
-    def names(self) -> list[str]                               # Sorted list
-```
-
-Global instance: `schema_registry`
-
-#### Built-in Schemas
-
-**InvoiceSchema** (name: `"invoice"`)
-Fields: invoice_number, invoice_date, due_date, currency, po_number, vendor_name, vendor_address, vendor_tax_id, vendor_representative, vendor_business_type, vendor_business_category, customer_name, customer_address, customer_tax_id, line_items (list[InvoiceLineItem]), subtotal, tax_amount, total_amount, payment_terms, payment_method, incoterms, country_of_origin.
-Validation: sum_equals (line items -> subtotal, subtotal+tax -> total), date_before (invoice < due), check_digit (vendor/customer tax ID), required (invoice_number, vendor_name, total_amount).
-
-**InvoiceLineItem**: description, quantity, unit, unit_price, amount, tax_rate, hs_code.
-
-**ReceiptSchema** (name: `"receipt"`)
-Fields: merchant_name, merchant_address, merchant_phone, merchant_tax_id, receipt_number, transaction_date, transaction_time, line_items (list[ReceiptLineItem]), subtotal, tax, tip, total, currency, payment_method, card_last_four.
-Validation: sum_equals, check_digit, required (merchant_name, total).
-
-**ReceiptLineItem**: description, quantity, unit_price, total_price, category.
-
-**BillOfLadingSchema** (name: `"bill_of_lading"`)
-Fields: bl_number, bl_type, booking_number, shipper_name, shipper_address, consignee_name, consignee_address, notify_party_name, notify_party_address, vessel_name, voyage_number, port_of_loading, port_of_discharge, place_of_receipt, place_of_delivery, shipped_on_board_date, issue_date, containers (list[ContainerDetail]), description_of_goods, hs_code, total_packages, total_gross_weight_kg, total_measurement_cbm, freight_terms, freight_amount, freight_currency, number_of_originals, place_of_issue, carrier_name.
-Validation: required (bl_number, shipper, consignee, ports), date_before, sum_equals (containers -> totals), regex (hs_code, currency).
-
-**ContainerDetail**: container_number, seal_number, container_type, packages, gross_weight_kg, measurement_cbm.
-
-**PurchaseOrderSchema** (name: `"purchase_order"`)
-Fields: po_number, po_date, revision, buyer_name, buyer_address, buyer_contact, buyer_tax_id, seller_name, seller_address, seller_contact, seller_tax_id, line_items (list[POLineItem]), subtotal, tax_amount, total_amount, currency, payment_terms, delivery_terms, delivery_date, ship_to_address, notes.
-Validation: required, sum_equals, date_before, regex (currency).
-
-**POLineItem**: line_number, item_number, description, quantity, unit, unit_price, amount, hs_code, delivery_date.
-
-**KRTaxInvoiceSchema** (name: `"kr_tax_invoice"`)
-Fields: approval_number, issue_date, supplier_business_number, supplier_name, supplier_representative, supplier_address, supplier_business_type, supplier_business_category, supplier_email, buyer_business_number, buyer_name, buyer_representative, buyer_address, buyer_business_type, buyer_business_category, buyer_email, line_items (list[TaxInvoiceLineItem]), total_supply_amount, total_tax_amount, total_amount, cash_amount, check_amount, promissory_note_amount, receivable_amount, remark, invoice_type.
-Validation: required (business numbers, names, totals), check_digit (kr_business_number), sum_equals.
-
-**TaxInvoiceLineItem**: supply_date, item_name, specification, quantity, unit_price, supply_amount, tax_amount, remark.
-
-**BankStatementSchema** (name: `"bank_statement"`)
-Fields: bank_name, branch_name, account_number, account_holder, iban, currency, statement_date, period_start, period_end, opening_balance, closing_balance, total_debits, total_credits, transactions (list[Transaction]).
-Validation: required (account_number, balances), date_before (period start < end), check_digit (IBAN mod97).
-
-**Transaction**: date, description, reference, debit, credit, balance, category.
-
-**IDDocumentSchema** (name: `"id_document"`)
-Fields: document_type, document_number, issuing_country, issuing_authority, surname, given_names, nationality, date_of_birth, sex, place_of_birth, date_of_issue, date_of_expiry, mrz_line_1, mrz_line_2, mrz_line_3, personal_number, address, driver_license_class.
-Validation: required (document_number, name, birth date), date_before (birth < issue < expiry), regex (country codes, sex).
-
-**CertificateOfOriginSchema** (name: `"certificate_of_origin"`)
-Fields: certificate_number, certificate_type, issue_date, exporter_name, exporter_address, exporter_country, consignee_name, consignee_address, consignee_country, transport_means, port_of_loading, port_of_discharge, country_of_origin, items (list[CertificateItem]), invoice_number, invoice_date, certifying_authority, stamp_or_seal.
-Validation: required (certificate_number, exporter_name, origin), regex (country codes ISO 3166-1 alpha-2).
-
-**CertificateItem**: description, hs_code, quantity, weight_kg, value, origin_criterion.
-
----
+## API — Validation
 
 ### Validation Rules
+All extend `ValidationRule(ABC)`: `.validate(data) -> ValidationError|ValidationWarning|None`, `.name -> str`
+`Validator(rules: list[ValidationRule]|None=None)` → `.validate(data) -> ValidationResult`
 
-All rules extend `ValidationRule(ABC)`.
+| Rule | Constructor | Behavior |
+|------|------------|----------|
+| `RequiredFieldRule` | `(field: str)` | Warning if field missing/empty |
+| `SumEqualsRule` | `(sources: str\|list[str], target: str, tolerance: float=0.01)` | Sum of sources == target; dot-notation for arrays |
+| `DateBeforeRule` | `(before_field: str, after_field: str)` | before <= after (ISO string) |
+| `FieldEqualsRule` | `(field_a: str, field_b: str)` | a == b |
+| `RangeRule` | `(field: str, min_val: float\|None, max_val: float\|None)` | Numeric within [min, max] |
+| `RegexRule` | `(field: str, pattern: str, description: str="")` | Field matches regex |
+| `CheckDigitRule` | `(field: str, algorithm: str)` | Algorithms: `kr_business_number`, `luhn`, `iso_6346`, `awb_mod7`, `iban_mod97` |
 
-#### class ValidationRule (ABC)
-
-```python
-class ValidationRule(ABC):
-    @abstractmethod
-    def validate(self, data: dict[str, Any]) -> ValidationError | ValidationWarning | None
-    @property
-    @abstractmethod
-    def name(self) -> str
-```
-
-#### class Validator
-
-```python
-class Validator:
-    def __init__(self, rules: list[ValidationRule] | None = None) -> None
-    def validate(self, data: dict[str, Any]) -> ValidationResult
-```
-
-#### class RequiredFieldRule(ValidationRule)
-
-```python
-def __init__(self, field: str) -> None
-```
-
-Validates field is present and non-empty. Returns `ValidationWarning` (not error) if missing.
-
-#### class SumEqualsRule(ValidationRule)
-
-```python
-def __init__(self, sources: str | list[str], target: str, tolerance: float = 0.01) -> None
-```
-
-Validates that sum of source fields equals target field. Supports dot-notation for array aggregation (e.g., `"line_items.amount"`).
-
-#### class DateBeforeRule(ValidationRule)
-
-```python
-def __init__(self, before_field: str, after_field: str) -> None
-```
-
-Validates that date in `before_field` is <= date in `after_field` (ISO string comparison).
-
-#### class FieldEqualsRule(ValidationRule)
-
-```python
-def __init__(self, field_a: str, field_b: str) -> None
-```
-
-Validates that two fields have the same value.
-
-#### class RangeRule(ValidationRule)
-
-```python
-def __init__(self, field: str, min_val: float | None = None, max_val: float | None = None) -> None
-```
-
-Validates that a numeric field is within [min_val, max_val].
-
-#### class RegexRule(ValidationRule)
-
-```python
-def __init__(self, field: str, pattern: str, description: str = "") -> None
-```
-
-Validates that a field matches a regex pattern.
-
-#### class CheckDigitRule(ValidationRule)
-
-```python
-def __init__(self, field: str, algorithm: str) -> None
-```
-
-Validates using a check digit algorithm. Available algorithms: `"kr_business_number"`, `"luhn"`, `"iso_6346"`, `"awb_mod7"`, `"iban_mod97"`.
-
-#### Checksum Functions
-
-```python
-def verify_kr_business_number(value: str) -> bool   # Korean 10-digit business number
-def verify_luhn(value: str) -> bool                  # Luhn checksum (credit cards)
-def verify_iso_6346(value: str) -> bool              # ISO 6346 container number
-def verify_awb_mod7(value: str) -> bool              # Air Waybill (11 digits, mod 7)
-def verify_iban_mod97(value: str) -> bool            # IBAN (ISO 13616, mod 97)
-```
-
----
+### Checksum Functions (docpick.validation.checksum)
+`verify_kr_business_number(v) -> bool` — Korean 10-digit biz number
+`verify_luhn(v) -> bool` — Credit card checksum
+`verify_iso_6346(v) -> bool` — Container number
+`verify_awb_mod7(v) -> bool` — Air Waybill 11-digit mod7
+`verify_iban_mod97(v) -> bool` — IBAN ISO 13616
 
 ### Cross-Document Validation
-
-#### class CrossDocumentValidator
-
 ```python
-class CrossDocumentValidator:
-    def __init__(self) -> None
+CrossDocumentValidator()
 ```
+`.add_mapping(source_doc, source_field, target_doc, target_field, rule="equals", tolerance=0.01, desc="") -> None`
+Rules: `equals`, `less_than_or_equal`, `contains`
+`.validate(documents: dict[str, dict]) -> CrossDocumentResult`
+CrossDocumentResult: `is_valid`, `errors`, `warnings`, `checks_applied`, `checks_passed`
+`create_trade_document_validator() -> CrossDocumentValidator` — Pre-configured Invoice<->B/L<->PackingList<->CertOfOrigin
 
-##### add_mapping
-
-```python
-def add_mapping(
-    self,
-    source_doc: str,
-    source_field: str,
-    target_doc: str,
-    target_field: str,
-    rule: str = "equals",
-    tolerance: float = 0.01,
-    description: str = "",
-) -> None
-```
-
-Add a cross-document field mapping. Rules: `"equals"`, `"less_than_or_equal"`, `"contains"`.
-
-##### validate
-
-```python
-def validate(self, documents: dict[str, dict[str, Any]]) -> CrossDocumentResult
-```
-
-Validate all mappings. `documents` maps document name to extracted data dict.
-
-#### class CrossDocumentResult
-
-```python
-@dataclass
-class CrossDocumentResult:
-    is_valid: bool = True
-    errors: list[ValidationError] = []
-    warnings: list[ValidationWarning] = []
-    checks_applied: int = 0
-    checks_passed: int = 0
-```
-
-#### class CrossFieldMapping
-
-```python
-@dataclass
-class CrossFieldMapping:
-    source_doc: str
-    source_field: str
-    target_doc: str
-    target_field: str
-    rule: str = "equals"              # equals | less_than_or_equal | contains
-    tolerance: float = 0.01
-    description: str = ""
-```
-
-#### create_trade_document_validator
-
-```python
-def create_trade_document_validator() -> CrossDocumentValidator
-```
-
-Returns a pre-configured validator for standard trade document flow (Invoice <-> B/L <-> Packing List <-> Certificate of Origin). Pre-configured mappings: vendor/shipper match, consignee/buyer match, weight consistency, package count consistency, origin country consistency.
-
----
-
-### MCP Server
-
-Entry point: `docpick-mcp` (stdio transport).
-
-#### extract_document
-
-```python
-@mcp.tool()
-def extract_document(
-    file_path: str,
-    schema: str = "invoice",
-    ocr_engine: str = "auto",
-    output_format: str = "json",
-) -> str
-```
-
-Extract structured data from a document using OCR + LLM.
-
-**Parameters:**
-- `file_path` (`str`): Path to document file (PDF, PNG, JPG, TIFF).
-- `schema` (`str`): Schema name. Default: `"invoice"`.
-- `ocr_engine` (`str`): OCR engine. Default: `"auto"`.
-- `output_format` (`str`): `"json"` or `"text"`. Default: `"json"`.
-
-**Returns:** JSON string or raw text.
-
-#### ocr_document
-
-```python
-@mcp.tool()
-def ocr_document(
-    file_path: str,
-    engine: str = "auto",
-) -> str
-```
-
-Run OCR only without LLM extraction.
-
-**Returns:** JSON string with text, markdown, engine, avg_confidence, block_count, table_count, processing_time_ms.
-
-#### list_schemas
-
-```python
-@mcp.tool()
-def list_schemas() -> str
-```
-
-List all available built-in document schemas with their fields.
-
-**Returns:** JSON array of `{name, fields}` objects.
+## MCP Server
+Entry: `docpick-mcp` (stdio). Tools:
+`extract_document(file_path: str, schema: str="invoice", ocr_engine: str="auto", output_format: str="json") -> str`
+`ocr_document(file_path: str, engine: str="auto") -> str` — Returns JSON: text, markdown, engine, avg_confidence, block_count, table_count, processing_time_ms
+`list_schemas() -> str` — JSON array of {name, fields}
 
 ## Examples
-
-### Basic Extraction
-
 ```python
-from docpick import DocpickPipeline, DocpickConfig
+# Basic extraction
+from docpick import DocpickPipeline
 from docpick.schemas import InvoiceSchema
-
-# Default config (loads from ~/.docpick/config.yaml or env vars)
-pipeline = DocpickPipeline()
-result = pipeline.extract("invoice.pdf", schema=InvoiceSchema)
-
-print(result.data)              # {"invoice_number": "INV-001", "total_amount": 1500.00, ...}
-print(result.confidence)        # {"invoice_number": 0.95, "total_amount": 0.88, ...}
-print(result.validation.is_valid)  # True/False
-print(result.processing_time_ms)   # 2340.5
+result = DocpickPipeline().extract("invoice.pdf", schema=InvoiceSchema)
+print(result.data, result.confidence, result.validation.is_valid)
 ```
-
-### OCR-Only Mode
-
 ```python
-pipeline = DocpickPipeline()
-result = pipeline.extract("document.pdf", mode="ocr_only")
-
-print(result.text)       # Raw OCR text
-print(result.markdown)   # Structured markdown with headings and tables
-```
-
-### VLM Direct Extraction (skip OCR)
-
-```python
-config = DocpickConfig.load()
-config.vlm.enabled = True
-config.vlm.base_url = "http://localhost:11434/v1"
-config.vlm.model = "Qwen/Qwen3-VL-4B"
-
-pipeline = DocpickPipeline(config)
-result = pipeline.extract("receipt.jpg", schema=ReceiptSchema, mode="vlm")
-print(result.data)
-```
-
-### Custom Configuration
-
-```python
-from docpick import DocpickPipeline, DocpickConfig
-from docpick.core.config import OCRConfig, LLMConfig
-
-config = DocpickConfig(
-    ocr=OCRConfig(engine="paddle", languages=["en"], confidence_threshold=0.8),
-    llm=LLMConfig(
-        provider="ollama",
-        base_url="http://localhost:11434",
-        model="qwen3.5:7b",
-        temperature=0.0,
-    ),
-)
-pipeline = DocpickPipeline(config)
-```
-
-### Batch Processing
-
-```python
+# Batch processing
 from docpick.batch import BatchProcessor
 from docpick.schemas import InvoiceSchema
-
-processor = BatchProcessor(concurrency=8)
-result = processor.process_directory(
-    "./invoices/",
-    schema=InvoiceSchema,
-    recursive=True,
-    on_progress=lambda done, total: print(f"{done}/{total}"),
-)
-
-print(result.summary)
-# {"total": 50, "succeeded": 48, "failed": 2, "processing_time_ms": 45000}
-
-for path, extraction in result.results.items():
-    print(f"{path}: {extraction.data.get('total_amount')}")
+batch = BatchProcessor(concurrency=8)
+result = batch.process_directory("./invoices/", schema=InvoiceSchema, recursive=True)
+for path, r in result.results.items(): print(path, r.data.get("total_amount"))
 ```
-
-### Custom Schema
-
 ```python
+# Custom schema + validation
 from docpick.schemas.base import DocumentSchema, schema_registry
 from docpick.validation.rules import RequiredFieldRule, RegexRule
-from pydantic import Field
-
 class ShippingLabel(DocumentSchema):
-    """Custom shipping label schema."""
     tracking_number: str | None = None
-    sender_name: str | None = None
-    sender_address: str | None = None
     recipient_name: str | None = None
-    recipient_address: str | None = None
-    weight_kg: float | None = None
-    service_type: str | None = Field(None, description="Express, Standard, etc.")
-
     class ValidationRules:
-        rules = [
-            RequiredFieldRule("tracking_number"),
-            RequiredFieldRule("recipient_name"),
-            RegexRule("tracking_number", r"^[A-Z0-9]{10,30}$", "tracking number format"),
-        ]
-
-# Register for CLI use
+        rules = [RequiredFieldRule("tracking_number"), RegexRule("tracking_number", r"^[A-Z0-9]{10,30}$")]
 schema_registry.register("shipping_label", ShippingLabel)
-
-# Use in pipeline
-pipeline = DocpickPipeline()
-result = pipeline.extract("label.png", schema=ShippingLabel)
-```
-
-### Custom JSON Schema File
-
-```bash
-# schema.json
-# {"title": "CustomDoc", "properties": {"name": {"type": "string"}, "amount": {"type": "number"}}, "required": ["name"]}
-
-docpick extract document.pdf --schema ./schema.json
-```
-
-### Validation
-
-```python
-from docpick.validation import Validator, SumEqualsRule, CheckDigitRule, RangeRule
-
-rules = [
-    SumEqualsRule(["subtotal", "tax_amount"], "total_amount"),
-    CheckDigitRule("vendor_tax_id", "kr_business_number"),
-    RangeRule("total_amount", min_val=0, max_val=1_000_000),
-]
-
-validator = Validator(rules)
-result = validator.validate(extracted_data)
-
-if not result.is_valid:
-    for error in result.errors:
-        print(f"{error.field}: {error.message}")
-```
-
-### Cross-Document Validation
-
-```python
-from docpick.validation import CrossDocumentValidator, create_trade_document_validator
-
-# Pre-configured trade document validator
-validator = create_trade_document_validator()
-
-result = validator.validate({
-    "invoice": invoice_result.data,
-    "bl": bl_result.data,
-    "certificate": cert_result.data,
-})
-
-print(f"Valid: {result.is_valid}, Passed: {result.checks_passed}/{result.checks_applied}")
-
-# Custom cross-document checks
-validator = CrossDocumentValidator()
-validator.add_mapping("invoice", "total_amount", "po", "total_amount", "equals", tolerance=0.01)
-validator.add_mapping("invoice", "vendor_name", "bl", "shipper_name", "contains")
-```
-
-### Check Digit Verification (standalone)
-
-```python
-from docpick.validation.checksum import (
-    verify_kr_business_number,
-    verify_luhn,
-    verify_iso_6346,
-    verify_iban_mod97,
-    verify_awb_mod7,
-)
-
-verify_kr_business_number("123-45-67890")  # True/False
-verify_luhn("4532015112830366")            # True/False
-verify_iso_6346("CSQU3054383")             # True/False
-verify_iban_mod97("DE89 3704 0044 0532 0130 00")  # True/False
-verify_awb_mod7("180-12345675")            # True/False
-```
-
-### Using Specific OCR Engine
-
-```python
-from docpick.ocr import get_engine
-
-engine = get_engine("paddle")
-result = engine.recognize(pil_image, languages=["ko", "en"])
-print(result.text)
-print(result.avg_confidence)
-print(result.to_markdown())
-
-# GOT-OCR2.0 with formatted output
-got = get_engine("got")
-result = got.recognize(pil_image)  # Uses GPU, produces structured text
 ```
 
 ## Links
-
-- Docs: https://github.com/QuartzUnit/docpick
-- PyPI: https://pypi.org/project/docpick/
-- Source: https://github.com/QuartzUnit/docpick
-- Issues: https://github.com/QuartzUnit/docpick/issues
-- License: Apache-2.0
-- Python: >= 3.11
-- Version: 0.1.3
+- [Docs](https://github.com/QuartzUnit/docpick) | [PyPI](https://pypi.org/project/docpick/) | [Issues](https://github.com/QuartzUnit/docpick/issues)
+- License: Apache-2.0 | Version: 0.1.3
