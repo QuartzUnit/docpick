@@ -242,3 +242,8 @@ flowchart TD
 Apache 2.0 — all dependencies are Apache 2.0 or MIT licensed.
 
 <!-- mcp-name: io.github.QuartzUnit/docpick -->
+
+
+---
+
+<sub>Part of the [QuartzUnit](https://github.com/QuartzUnit) ecosystem — composable Python libraries for data collection, extraction, search, and AI agent safety.</sub>

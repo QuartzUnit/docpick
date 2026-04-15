@@ -75,6 +75,8 @@ docpick-mcp = "docpick.mcp_server:main"
 Homepage = "https://github.com/QuartzUnit/docpick"
 Repository = "https://github.com/QuartzUnit/docpick"
 Issues = "https://github.com/QuartzUnit/docpick/issues"
+Documentation = "https://github.com/QuartzUnit/docpick#readme"
+Changelog = "https://github.com/QuartzUnit/docpick/releases"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/docpick"]
