@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/github/license/QuartzUnit/docpick)](https://github.com/QuartzUnit/docpick/blob/main/LICENSE)
 [![Tests](https://img.shields.io/badge/tests-217%20passed-brightgreen)]()
 
-> [한국어 문서](README.ko.md)
+> [한국어 문서](README.ko.md) · [llms.txt](llms.txt)
 
 > Document in, Structured JSON out. Locally. With your schema.
 
